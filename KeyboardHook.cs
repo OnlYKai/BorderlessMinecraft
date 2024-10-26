@@ -9,17 +9,17 @@ namespace BorderlessMinecraft
 {
     public class KeyboardHook
     {
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool UnhookWindowsHookEx(IntPtr hhk);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
         
-        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr GetModuleHandle(string lpModuleName);
         
         [DllImport("user32.dll")]
@@ -39,8 +39,10 @@ namespace BorderlessMinecraft
         private static LowLevelKeyboardProc _proc;
         private static IntPtr _hookID;
         
-        private const int WH_KEYBOARD_LL = 13;  // Low-level keyboard hook constant
-        private const int WM_KEYDOWN = 0x0100;  // Key down message constant
+        private const int WH_KEYBOARD_LL = 13;
+        
+        private static readonly Regex regexTitle = new Regex("^Minecraft(?!.*(?i)server).*$");
+        private static readonly StringBuilder windowText = new StringBuilder(256);
         
         
         public KeyboardHook()
@@ -72,38 +74,25 @@ namespace BorderlessMinecraft
         // Action when KeyboardHook catches an input
         private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if ((Keys)Marshal.ReadInt32(lParam) != Keys.F11)
-                return CallNextHookEx(_hookID, nCode, wParam, lParam);
-            
-            if (!(nCode >= 0 && wParam == (IntPtr)WM_KEYDOWN))
+            if ((Keys)Marshal.ReadInt32(lParam) != Keys.F11 || nCode < 0 || wParam != (IntPtr)0x0100)
                 return CallNextHookEx(_hookID, nCode, wParam, lParam);
             
             IntPtr handle = GetForegroundWindow();
-            StringBuilder windowText = new StringBuilder(256);
             GetWindowText(handle, windowText, windowText.Capacity);
-                
             string windowTitle = windowText.ToString().Trim();
-            Regex regexTitle = new Regex("^Minecraft(?!.*(?i)server).*$");
+            if (!regexTitle.IsMatch(windowTitle))
+                return CallNextHookEx(_hookID, nCode, wParam, lParam);;
 
-            if (!(IsJavaProcess(handle) && regexTitle.IsMatch(windowTitle)))
+            GetWindowThreadProcessId(handle, out uint processId);
+            Process process = Process.GetProcessById((int)processId); // This bitch is cpu heavy as shit so make sure to check the title beforehand!!!
+            if (!(process.ProcessName.Equals("javaw", StringComparison.OrdinalIgnoreCase) || process.ProcessName.Equals("java", StringComparison.OrdinalIgnoreCase)))
+                return CallNextHookEx(_hookID, nCode, wParam, lParam);
+            
+            if (WindowManager.IsFullscreen(handle))
                 return CallNextHookEx(_hookID, nCode, wParam, lParam);
             
             WindowManager.ToggleBorderless(handle);
             return (IntPtr)1;
-        }
-        
-        private bool IsJavaProcess(IntPtr handle)
-        {
-            try
-            {
-                GetWindowThreadProcessId(handle, out uint processId);
-                Process process = Process.GetProcessById((int)processId);
-                return process.ProcessName.Equals("javaw", StringComparison.OrdinalIgnoreCase) || process.ProcessName.Equals("java", StringComparison.OrdinalIgnoreCase);
-            }
-            catch
-            {
-                return false;
-            }
         }
         
     }

@@ -111,9 +111,9 @@ namespace BorderlessMinecraft
         
         
         
-        internal static bool IsNotFullscreen(IntPtr handle)
+        internal static bool IsFullscreen(IntPtr handle)
         {
-            return GetWindowLong(handle, GWL_STYLE) > 0;
+            return GetWindowLong(handle, GWL_STYLE) < 0;
         }
         
     }

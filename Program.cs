@@ -33,7 +33,7 @@ namespace BorderlessMinecraft
         private readonly WindowMonitor _windowMonitor;
         public static KeyboardHook _keyboardHook;
         
-        public static CancellationTokenSource _cts = new CancellationTokenSource();
+        public static CancellationTokenSource cts = new CancellationTokenSource();
         
         public Context()
         {
@@ -66,13 +66,13 @@ namespace BorderlessMinecraft
                 Visible = true,
             };
             
+            // Setup KeyboardHook
+            _keyboardHook = new KeyboardHook();
+            // Start in WindowMonitor, Stop in Cleaner (and Exit ofc)
+            
             // Setup Window Monitor
             _windowMonitor = new WindowMonitor();
             _windowMonitor.Start();
-            
-            // Setup KeyboardHook
-            _keyboardHook = new KeyboardHook();
-            // Start in WindowMonitor, Stop in Cleaner and Exit
             
             // Start Cleaner
             CleanProcesses();
@@ -107,7 +107,7 @@ namespace BorderlessMinecraft
         private void OnExit(Object sender, EventArgs e)
         {
             _trayIcon.Visible = false;
-            _cts.Cancel();
+            cts.Cancel();
             _windowMonitor.Stop();
             _keyboardHook.RemoveHook();
             Application.Exit();
@@ -144,9 +144,9 @@ namespace BorderlessMinecraft
         {
             Task.Run(() =>
             {
-                while (!_cts.Token.IsCancellationRequested)
+                while (!cts.Token.IsCancellationRequested)
                 {
-                    while (WindowMonitor.processesDetected.Count > 0 && !_cts.Token.IsCancellationRequested)
+                    while (WindowMonitor.processesDetected.Count > 0 && !cts.Token.IsCancellationRequested)
                     {
                         List<int> processesTerminated = new List<int>();
 
@@ -176,12 +176,12 @@ namespace BorderlessMinecraft
                         if (WindowMonitor.processesDetected.Count == 0)
                             _keyboardHook.RemoveHook();
                         
-                        _cts.Token.WaitHandle.WaitOne(10000);
+                        cts.Token.WaitHandle.WaitOne(10000);
                     }
 
-                    _cts.Token.WaitHandle.WaitOne(10000);
+                    cts.Token.WaitHandle.WaitOne(10000);
                 }
-            }, _cts.Token);
+            }, cts.Token);
         }
         
     }

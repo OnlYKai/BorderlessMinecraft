@@ -45,23 +45,30 @@ namespace BorderlessMinecraft
         private delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType, IntPtr handle, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
         
         private WinEventDelegate _winEventDelegate;
-        private IntPtr _hook;
+        private IntPtr _hooktitle;
+        private IntPtr _hookcreate;
         
-        private const uint EVENT_CREATED = 0x8000;
         private const uint EVENT_TITLECHANGED = 0x800C;
+        private const uint EVENT_CREATED = 0x8000;
+        
+        private static readonly Regex regexTitle = new Regex("^Minecraft(?!.*(?i)server).*$");
+        private static readonly StringBuilder windowText = new StringBuilder(256);
         
         
         // Start/Stop WindowMonitor
         public void Start()
         {
             _winEventDelegate = new WinEventDelegate(WinEventProc);
-            _hook = SetWinEventHook(EVENT_CREATED, EVENT_TITLECHANGED, IntPtr.Zero, _winEventDelegate, 0, 0, 0);
+            _hooktitle = SetWinEventHook(EVENT_TITLECHANGED, EVENT_TITLECHANGED, IntPtr.Zero, _winEventDelegate, 0, 0, 0);
+            _hookcreate = SetWinEventHook(EVENT_CREATED, EVENT_CREATED, IntPtr.Zero, _winEventDelegate, 0, 0, 0);
         }
 
         public void Stop()
         {
-            if (_hook != IntPtr.Zero)
-                UnhookWinEvent(_hook);
+            if (_hooktitle != IntPtr.Zero)
+                UnhookWinEvent(_hooktitle);
+            if (_hookcreate != IntPtr.Zero)
+                UnhookWinEvent(_hookcreate);
         }
         
         
@@ -69,38 +76,30 @@ namespace BorderlessMinecraft
         // Action when WindowMonitor catches an event
         private void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr handle, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
         {
-            if (!(eventType == EVENT_CREATED || eventType == EVENT_TITLECHANGED))
-                return;
-            
             if (handle == IntPtr.Zero)
                 return;
             
-            StringBuilder windowText = new StringBuilder(256);
             GetWindowText(handle, windowText, windowText.Capacity);
             string windowTitle = windowText.ToString().Trim();
-
-            if (windowTitle.Length == 0)
+            if (windowTitle.Length == 0 || !regexTitle.IsMatch(windowTitle))
                 return;
             
-            Regex regexTitle = new Regex("^Minecraft(?!.*(?i)server).*$");
-
             GetWindowThreadProcessId(handle, out uint processId);
-            Process process = Process.GetProcessById((int)processId);
-            bool isJava = process.ProcessName.Equals("javaw", StringComparison.OrdinalIgnoreCase) || process.ProcessName.Equals("java", StringComparison.OrdinalIgnoreCase);
-            
-            if (!(isJava && regexTitle.IsMatch(windowTitle)))
+            if (processesDetected.Contains((int)processId))
                 return;
             
-            if (processesDetected.Contains((int)processId))
+            Process process = Process.GetProcessById((int)processId); // This bitch is cpu heavy as shit so make sure to check the title beforehand!!!
+            if (!(process.ProcessName.Equals("javaw", StringComparison.OrdinalIgnoreCase) || process.ProcessName.Equals("java", StringComparison.OrdinalIgnoreCase)))
                 return;
             
             // Add PID to list to make sure autoborderless is only executes once, even if the window is recreated
             processesDetected.Add((int)processId);
             
+            Console.WriteLine(windowTitle);
+
+            
             // Set KeyboardHook while minecraft is open
             Context._keyboardHook.SetHook();
-            
-            Console.WriteLine(windowTitle);
             
             if (!Context.autoborderless)
                 return;
@@ -108,15 +107,15 @@ namespace BorderlessMinecraft
             // Run all the waiting stuff in its own Task, so it doesn't block the main Thread (the Token stuff makes it cancellable when the program exits)
             Task.Run(() =>
             {
-                Context._cts.Token.WaitHandle.WaitOne(300);
+                Context.cts.Token.WaitHandle.WaitOne(300);
                 
-                while (IsLoadingColor(handle) && !Context._cts.Token.IsCancellationRequested)
-                    Context._cts.Token.WaitHandle.WaitOne(100);
+                while (IsLoadingColor(handle) && !Context.cts.Token.IsCancellationRequested)
+                    Context.cts.Token.WaitHandle.WaitOne(100);
                 
-                if (Context._cts.Token.IsCancellationRequested)
+                if (Context.cts.Token.IsCancellationRequested)
                     return;
                 
-                if (!WindowManager.IsNotFullscreen(handle))
+                if (WindowManager.IsFullscreen(handle))
                     return;
 
                 WindowManager.Rect currentPos = WindowManager.GetWindowRect(handle);
@@ -124,7 +123,7 @@ namespace BorderlessMinecraft
                     return;
 
                 WindowManager.SetBorderless(handle, (int)processId);
-            }, Context._cts.Token);
+            }, Context.cts.Token);
         }
         
         // Checking 4 corners' color to determine if minecraft is still starting
