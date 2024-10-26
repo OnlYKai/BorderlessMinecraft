@@ -13,6 +13,9 @@ namespace BorderlessMinecraft
     public class WindowMonitor
     {
         [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        
+        [DllImport("user32.dll")]
         private static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr hmodWinEventProc, WinEventDelegate lpfnWinEventProc, uint idProcess, uint idThread, uint dwFlags);
 
         [DllImport("user32.dll")]
@@ -42,6 +45,8 @@ namespace BorderlessMinecraft
 
         public static List<int> processesDetected = new List<int>();
         
+        private delegate bool EnumWindowsProc(IntPtr handle, IntPtr lParam);
+        
         private delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType, IntPtr handle, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
         
         private WinEventDelegate _winEventDelegate;
@@ -61,6 +66,11 @@ namespace BorderlessMinecraft
             _winEventDelegate = new WinEventDelegate(WinEventProc);
             _hooktitle = SetWinEventHook(EVENT_TITLECHANGED, EVENT_TITLECHANGED, IntPtr.Zero, _winEventDelegate, 0, 0, 0);
             _hookcreate = SetWinEventHook(EVENT_CREATED, EVENT_CREATED, IntPtr.Zero, _winEventDelegate, 0, 0, 0);
+            EnumWindows((handle, lParam) =>
+            {
+                CheckWindow(handle);
+                return true;
+            }, IntPtr.Zero);
         }
 
         public void Stop()
@@ -69,6 +79,62 @@ namespace BorderlessMinecraft
                 UnhookWinEvent(_hooktitle);
             if (_hookcreate != IntPtr.Zero)
                 UnhookWinEvent(_hookcreate);
+        }
+
+        
+
+        private void CheckWindow(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero)
+                return;
+            
+            GetWindowText(handle, windowText, windowText.Capacity);
+            string windowTitle = windowText.ToString().Trim();
+            if (windowTitle.Length == 0 || !regexTitle.IsMatch(windowTitle))
+                return;
+            
+            GetWindowThreadProcessId(handle, out uint processId);
+            if (processesDetected.Contains((int)processId))
+                return;
+            
+            Process process = Process.GetProcessById((int)processId); // This bitch is cpu heavy as shit so make sure to check the title beforehand!!!
+            if (!(process.ProcessName.Equals("javaw", StringComparison.OrdinalIgnoreCase) || process.ProcessName.Equals("java", StringComparison.OrdinalIgnoreCase)))
+                return;
+            
+            // Add PID to list to make sure autoborderless is only executes once, even if the window is recreated
+            processesDetected.Add((int)processId);
+            
+            Console.WriteLine(windowTitle);
+            
+            // Set KeyboardHook while minecraft is open
+            Context._keyboardHook.SetHook();
+            
+            if (!Context.autoborderless)
+                return;
+            
+            // Run all the waiting stuff in its own Task, so it doesn't block the main Thread (the Token stuff makes it cancellable when the program exits)
+            Task.Run(() =>
+            {
+                Context.cts.Token.WaitHandle.WaitOne(300);
+                
+                if (!IsLoadingColor(handle))
+                    return;
+                
+                while (IsLoadingColor(handle) && !Context.cts.Token.IsCancellationRequested)
+                    Context.cts.Token.WaitHandle.WaitOne(100);
+                
+                if (Context.cts.Token.IsCancellationRequested)
+                    return;
+                
+                if (WindowManager.IsFullscreen(handle))
+                    return;
+
+                WindowManager.Rect currentPos = WindowManager.GetWindowRect(handle);
+                if (currentPos.Left == 0 && currentPos.Top == 0 && currentPos.Right == Screen.PrimaryScreen.Bounds.Width && currentPos.Bottom == Screen.PrimaryScreen.Bounds.Height)
+                    return;
+
+                WindowManager.SetBorderless(handle, (int)processId);
+            }, Context.cts.Token);
         }
         
         
@@ -96,7 +162,6 @@ namespace BorderlessMinecraft
             processesDetected.Add((int)processId);
             
             Console.WriteLine(windowTitle);
-
             
             // Set KeyboardHook while minecraft is open
             Context._keyboardHook.SetHook();
